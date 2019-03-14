@@ -1,0 +1,199 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>CodeSpitz 3 - 4 - 6</title>
+<style>
+  aside{float:left;width:200px;padding:10px;border:1px solid #000}
+  main{margin-left:230px;padding:10px;border:1px solid #000}
+</style>
+</head>
+<body>
+  <aside>
+    <ul id="folders"></ul>
+    <input id="newFolder">
+  </aside>
+  <main>
+    <section id="folder"></section>
+    <input id="newTask">
+  </main>
+<script>
+//util---------------------------------------------------------------
+const el = (tag, attr={})=>Object.entries(attr).reduce((el, v)=>{
+    typeof el[v[0]] == 'function' ? el[v[0]](v[1]) : (el[v[0]] = v[1]);
+    return el;
+}, document.createElement(tag));
+const p = (t, ...p)=>Object.assign(t, ...p)
+const Controller = class{
+  constructor(router){
+    this.router = router;
+  }
+  action(...arg){throw 1}
+  listen(m){throw 1}
+};
+const Model = class extends Set{
+  add(){throw 1} delete(){throw 1} has(){throw 1}
+  constructor(){
+    super();
+    this._prop = Object.create(null);
+  }
+  addListener(c){
+    super.add(c);
+  }
+  removeListener(c){
+    super.delete(c);
+  }
+  listen(m){throw 1;}
+  notify(){this.forEach(v=>v.listen(this))}
+};
+//Task(Model)---------------------------------------------------------------
+const Task = class extends Model{
+    constructor(title, date){
+    super()
+    p(this._prop, {title, date, isComplete:false, list:[]})
+    }
+  listen(m){this.notify();}
+  get title(){return this._prop.title;}
+    get isComplete(){return this._prop.isComplete;}
+    toggle(){
+    this._prop.isComplete = !this._prop.isComplete;
+    this.notify();
+  }
+    add(title, date = null){
+    const task = new Task(title, date);
+    this._prop.list.push(task);
+    task.addListener(this);
+    this.notify();
+    return task;
+  }  
+    remove(task){
+        const list = this._prop.list;
+        if(list.includes(task)){
+      list.splice(list.indexOf(task), 1);
+      task.removeListener(this);
+      this.notify();
+    }
+    }
+    list(sort){
+        const list = this._prop.list, f = (a, b)=>a[sort] > b[sort];
+        const map = task=>task.list(sort);
+        return {task:this, list:list.sort(f).map(map)};
+    }
+};
+//view----------------------------------------------------------------  
+const View = class{
+  constructor(controller){
+    this.controller = controller;
+    }
+  render(m){throw 1}
+};
+const IndexView = class extends View{
+  constructor(controller){
+    super(controller);
+    this.p = document.querySelector('#folders');
+    document.querySelector('#newFolder').onkeyup=e=>{
+      e.stopImmediatePropagation();
+      const {keyCode,target} = e;
+      if(keyCode == 13){
+        controller.add(target.value);
+        target.value = '';
+      }
+    };
+  }
+    render({list}){
+    this.p.innerHTML = '';
+        list.forEach(({task})=>{
+            const li = this.p.appendChild(el('li', {innerHTML:task.title}));
+      li.onclick =_=>this.controller.select(task);
+        });
+    }
+};
+const FolderView = class extends View{
+  constructor(controller){
+    super(controller);
+    this.p = document.querySelector('#folder');
+    document.querySelector('#newTask').onkeyup=e=>{
+      e.stopImmediatePropagation();
+      const {keyCode,target} = e;
+      if(keyCode == 13){
+        this.controller.addNew(target.value);
+        target.value = '';
+      }
+    };
+  }
+    render({task, list}){
+    this.p.innerHTML = `<h2>${task.title}</h2>`;
+    const ul = this.p.appendChild(el('ul'));
+        this.subTask(ul, task, list);
+    }
+  subTask(ul, parent, list){
+        list.forEach(({task, list})=>{
+            const li = ul.appendChild(el('li'));
+      const title = li.appendChild(el('span', {innerHTML:task.title}));
+      if(task.isComplete) title.style.textDecoration = 'line-through';
+      li.appendChild(el('span', {innerHTML:'X'})).onclick=_=>this.controller.remove(parent, task);
+      const input = li.appendChild(el('input'))
+      input.onclick =e=>e.stopImmediatePropagation();
+      input.onkeyup =e=>{
+        e.stopImmediatePropagation();
+        const {keyCode,target} = e;
+        if(keyCode == 13){
+          this.controller.add(task, target.value);
+          target.value = '';
+        }
+      };
+      li.onclick=e=>{
+        e.stopImmediatePropagation();
+        this.controller.toggle(task);
+      }
+            if(list.length) this.subTask(li.appendChild(el('ul')), task, list);
+        });
+    }
+};
+//controller----------------------------------------------------------------
+const Index = class extends Controller{
+  constructor(router){
+    super(router);
+    this.model = Task.root || (Task.root = new Task("root"));
+    this.model.addListener(this);
+    this.view = new IndexView(this);
+    this.title();
+  }
+  action(...arg){this.view.render(this.model.list(this.sort));}
+  listen(m){this.action();}
+  title(){this.sort = 'title';}
+  date(){this.sort = 'date';}
+  add(title){this.model.add(title);}
+  select(task){this.router.route("folder", task);}
+};
+const Folder = class extends Controller{
+  constructor(router){
+    super(router);
+    this.view = new FolderView(this);
+  }
+  action(...arg){
+    this.model = arg[0];
+    this.model.addListener(this);
+    this.view.render(this.model.list(this.sort));
+  }
+  listen(m){this.view.render(this.model.list(this.sort));}
+  addNew(title){this.model.add(title);}
+  add(parent, title){parent.add(title);}
+  remove(parent, task){parent.remove(task);}
+  toggle(task){task.toggle();}
+};
+//app---------------------------------------------------------------  
+const Router = class extends Map{
+  constructor(){super();}
+  route(key, ...arg){
+    this.get(key).action(...arg);
+  }
+};
+const router = new Router;
+router
+  .set('index', new Index(router))
+  .set('folder', new Folder(router));
+router.route('index');
+</script>
+</body>
+</html>
